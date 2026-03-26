@@ -1,8 +1,8 @@
 import { NextRequest } from 'next/server';
 import { getAnthropicClient } from '@/lib/anthropic';
-import { getAssessment, updateAssessment } from '@/lib/storage';
 import { SYSTEM_PROMPT, buildUserPrompt } from '@/lib/analysis-prompt';
 import { AnalysisResultSchema } from '@/lib/schemas';
+import type { PatientInfo } from '@/types';
 
 export const maxDuration = 60;
 
@@ -17,29 +17,14 @@ function extractAnalysisJSON(text: string): string | null {
 }
 
 export async function POST(request: NextRequest) {
-  const encoder = new TextEncoder();
-
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        const body = await request.json();
-        const { assessmentId } = body;
+        const body = await request.json() as { patientInfo?: PatientInfo; transcript?: string };
+        const { patientInfo, transcript } = body;
 
-        if (!assessmentId) {
-          sendSSE(controller, 'error', { message: 'Missing assessmentId' });
-          controller.close();
-          return;
-        }
-
-        const record = getAssessment(assessmentId);
-        if (!record) {
-          sendSSE(controller, 'error', { message: 'Assessment not found' });
-          controller.close();
-          return;
-        }
-
-        if (!record.transcript) {
-          sendSSE(controller, 'error', { message: 'No transcript found. Please transcribe audio first.' });
+        if (!patientInfo || !transcript) {
+          sendSSE(controller, 'error', { message: 'Missing patientInfo or transcript' });
           controller.close();
           return;
         }
@@ -47,60 +32,56 @@ export async function POST(request: NextRequest) {
         sendSSE(controller, 'status', { step: 'starting', message: 'Starting disfluency analysis...' });
 
         const anthropic = getAnthropicClient();
-        const userPrompt = buildUserPrompt(record.patientInfo, record.transcript);
+        const userPrompt = buildUserPrompt(patientInfo, transcript);
 
         sendSSE(controller, 'status', { step: 'analyzing', message: 'Analyzing transcript for disfluencies...' });
 
         let fullText = '';
+        let lastStep = '';
 
-        const stream = anthropic.messages.stream({
+        const claudeStream = anthropic.messages.stream({
           model: 'claude-sonnet-4-6',
           max_tokens: 3000,
           system: SYSTEM_PROMPT,
           messages: [{ role: 'user', content: userPrompt }],
         });
 
-        for await (const event of stream) {
+        for await (const event of claudeStream) {
           if (
             event.type === 'content_block_delta' &&
             event.delta.type === 'text_delta'
           ) {
             fullText += event.delta.text;
 
-            // Emit progress hints based on what's been accumulated
+            let nextStep = '';
             if (fullText.includes('"sld"') && !fullText.includes('"od"')) {
-              sendSSE(controller, 'status', {
-                step: 'counting_sld',
-                message: 'Counting stuttering-like disfluencies...',
-              });
+              nextStep = 'counting_sld';
             } else if (fullText.includes('"od"') && !fullText.includes('"percentSS"')) {
-              sendSSE(controller, 'status', {
-                step: 'counting_od',
-                message: 'Counting other disfluencies...',
-              });
+              nextStep = 'counting_od';
             } else if (fullText.includes('"percentSS"') && !fullText.includes('"recommendation"')) {
-              sendSSE(controller, 'status', {
-                step: 'calculating',
-                message: 'Calculating %SS and comparing to age norms...',
-              });
+              nextStep = 'calculating';
             } else if (fullText.includes('"recommendation"') && !fullText.includes('"therapyGoals"')) {
-              sendSSE(controller, 'status', {
-                step: 'recommendation',
-                message: 'Generating screening recommendation...',
-              });
+              nextStep = 'recommendation';
+            }
+
+            if (nextStep && nextStep !== lastStep) {
+              lastStep = nextStep;
+              const messages: Record<string, string> = {
+                counting_sld: 'Counting stuttering-like disfluencies...',
+                counting_od: 'Counting other disfluencies...',
+                calculating: 'Calculating %SS and comparing to age norms...',
+                recommendation: 'Generating screening recommendation...',
+              };
+              sendSSE(controller, 'status', { step: nextStep, message: messages[nextStep] });
             }
           }
         }
 
-        sendSSE(controller, 'status', { step: 'parsing', message: 'Parsing results...' });
+        sendSSE(controller, 'status', { step: 'parsing', message: 'Finalizing report...' });
 
         const jsonStr = extractAnalysisJSON(fullText);
         if (!jsonStr) {
-          sendSSE(controller, 'error', {
-            message: 'Failed to extract analysis from Claude response. Raw response saved.',
-            rawResponse: fullText.slice(0, 500),
-          });
-          updateAssessment(assessmentId, { status: 'error', errorMessage: 'Failed to parse Claude response' });
+          sendSSE(controller, 'error', { message: 'Failed to extract analysis from response.' });
           controller.close();
           return;
         }
@@ -110,7 +91,6 @@ export async function POST(request: NextRequest) {
           parsed = JSON.parse(jsonStr);
         } catch {
           sendSSE(controller, 'error', { message: 'Failed to parse analysis JSON.' });
-          updateAssessment(assessmentId, { status: 'error', errorMessage: 'JSON parse error' });
           controller.close();
           return;
         }
@@ -121,15 +101,9 @@ export async function POST(request: NextRequest) {
             message: 'Analysis result failed validation.',
             details: validated.error.flatten(),
           });
-          updateAssessment(assessmentId, { status: 'error', errorMessage: 'Validation error' });
           controller.close();
           return;
         }
-
-        updateAssessment(assessmentId, {
-          analysis: validated.data,
-          status: 'analyzed',
-        });
 
         sendSSE(controller, 'result', validated.data);
         controller.close();
