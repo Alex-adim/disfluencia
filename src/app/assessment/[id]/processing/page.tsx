@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import type { AnalysisResult } from '@/types';
+import type { PatientInfo } from '@/types';
 
 interface StatusEvent {
   step: string;
@@ -36,21 +36,32 @@ export default function ProcessingPage() {
     let cancelled = false;
 
     async function runAnalysis() {
+      const patientJson = sessionStorage.getItem(`assessment:${id}:patient`);
+      const transcript = sessionStorage.getItem(`assessment:${id}:transcript`);
+
+      if (!patientJson || !transcript) {
+        setError('Session data not found. Please start a new assessment.');
+        return;
+      }
+
+      const patientInfo = JSON.parse(patientJson) as PatientInfo;
+
       try {
         const response = await fetch('/api/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ assessmentId: id }),
+          body: JSON.stringify({ patientInfo, transcript }),
         });
 
         if (!response.body) {
-          setError('No response body from analysis API');
+          setError('No response from analysis API');
           return;
         }
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        let currentStepLocal = 'starting';
 
         while (!cancelled) {
           const { done, value } = await reader.read();
@@ -76,13 +87,13 @@ export default function ProcessingPage() {
                   const status = payload as StatusEvent;
                   setCompletedSteps((prev) => {
                     const next = new Set(prev);
-                    // Mark previous step as completed
-                    if (currentStep) next.add(currentStep);
+                    next.add(currentStepLocal);
                     return next;
                   });
+                  currentStepLocal = status.step;
                   setCurrentStep(status.step);
                 } else if (eventType === 'result') {
-                  // Mark all steps complete
+                  sessionStorage.setItem(`assessment:${id}:analysis`, JSON.stringify(payload));
                   setCompletedSteps(new Set(STEPS.map((s) => s.key)));
                   setCurrentStep('done');
                   setTimeout(() => {
@@ -109,7 +120,7 @@ export default function ProcessingPage() {
 
     runAnalysis();
     return () => { cancelled = true; };
-  }, [id, router, started, currentStep]);
+  }, [id, router, started]);
 
   const currentStepIndex = STEPS.findIndex((s) => s.key === currentStep);
 
@@ -143,7 +154,6 @@ export default function ProcessingPage() {
             {STEPS.map((step, i) => {
               const isCompleted = completedSteps.has(step.key);
               const isActive = step.key === currentStep;
-              const isPending = !isCompleted && !isActive;
 
               return (
                 <div key={step.key} className="flex items-center gap-4">
@@ -177,9 +187,7 @@ export default function ProcessingPage() {
               <div
                 className="h-2 bg-blue-500 rounded-full transition-all duration-500"
                 style={{
-                  width: `${currentStep === 'done'
-                    ? 100
-                    : Math.round(((currentStepIndex + 1) / STEPS.length) * 100)}%`
+                  width: `${currentStep === 'done' ? 100 : Math.round(((currentStepIndex + 1) / STEPS.length) * 100)}%`
                 }}
               />
             </div>

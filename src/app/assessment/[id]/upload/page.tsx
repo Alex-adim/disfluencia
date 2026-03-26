@@ -1,17 +1,31 @@
 'use client';
 
 import { useParams, useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import AudioUploader from '@/components/AudioUploader';
+import type { PatientInfo } from '@/types';
 
 export default function UploadPage() {
   const params = useParams();
   const router = useRouter();
   const id = params.id as string;
+  const [patientInfo, setPatientInfo] = useState<PatientInfo | null>(null);
+
+  useEffect(() => {
+    const stored = sessionStorage.getItem(`assessment:${id}:patient`);
+    if (!stored) {
+      router.push('/assessment/new');
+      return;
+    }
+    setPatientInfo(JSON.parse(stored) as PatientInfo);
+  }, [id, router]);
 
   async function handleUpload(file: File) {
+    if (!patientInfo) throw new Error('Patient information not found');
+
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('assessmentId', id);
+    formData.append('patientInfo', JSON.stringify(patientInfo));
 
     const response = await fetch('/api/transcribe', {
       method: 'POST',
@@ -23,8 +37,15 @@ export default function UploadPage() {
       throw new Error(err.error || 'Transcription failed');
     }
 
+    const { transcript, whisperSegments } = await response.json();
+
+    sessionStorage.setItem(`assessment:${id}:transcript`, transcript);
+    sessionStorage.setItem(`assessment:${id}:segments`, JSON.stringify(whisperSegments ?? []));
+
     router.push(`/assessment/${id}/processing`);
   }
+
+  if (!patientInfo) return null;
 
   return (
     <div>
@@ -36,7 +57,6 @@ export default function UploadPage() {
           <span>/</span>
           <span className="text-slate-700">Upload Audio</span>
         </div>
-
         <h2 className="text-2xl font-bold text-slate-900">Upload Audio Recording</h2>
         <p className="text-slate-500 mt-1">
           Upload the child&apos;s Frog Story narrative recording for analysis.
@@ -46,14 +66,16 @@ export default function UploadPage() {
       <div className="flex items-center gap-2 mb-8 no-print">
         {['Patient Info', 'Upload Audio', 'Processing', 'Results'].map((step, i) => (
           <div key={step} className="flex items-center gap-2">
-            <div className={`flex items-center gap-2 ${i === 1 ? 'text-blue-600' : i < 1 ? 'text-green-600' : 'text-slate-400'}`}>
+            <div className="flex items-center gap-2">
               <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold border-2
                 ${i === 1 ? 'bg-blue-600 border-blue-600 text-white' :
                   i < 1 ? 'bg-green-500 border-green-500 text-white' :
                   'border-slate-300 text-slate-400'}`}>
                 {i < 1 ? '✓' : i + 1}
               </div>
-              <span className={`text-sm font-medium hidden sm:block`}>{step}</span>
+              <span className={`text-sm font-medium hidden sm:block ${i === 1 ? 'text-blue-600' : i < 1 ? 'text-green-600' : 'text-slate-400'}`}>
+                {step}
+              </span>
             </div>
             {i < 3 && <div className="w-8 h-px bg-slate-200 mx-1" />}
           </div>

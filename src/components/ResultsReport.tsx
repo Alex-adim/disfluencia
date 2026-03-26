@@ -1,10 +1,12 @@
 'use client';
 
-import type { AssessmentRecord, Recommendation } from '@/types';
+import type { PatientInfo, AnalysisResult, Recommendation } from '@/types';
 import DisfluencyTable from './DisfluencyTable';
 
 interface Props {
-  record: AssessmentRecord;
+  patientInfo: PatientInfo;
+  transcript: string;
+  analysis: AnalysisResult;
 }
 
 const RECOMMENDATION_CONFIG: Record<
@@ -34,7 +36,7 @@ const RECOMMENDATION_CONFIG: Record<
   },
 };
 
-function formatAge(patient: AssessmentRecord['patientInfo']): string {
+function formatAge(patient: PatientInfo): string {
   const { ageYears, ageMonths } = patient;
   const parts = [];
   if (ageYears > 0) parts.push(`${ageYears} year${ageYears !== 1 ? 's' : ''}`);
@@ -42,10 +44,7 @@ function formatAge(patient: AssessmentRecord['patientInfo']): string {
   return parts.join(', ');
 }
 
-export default function ResultsReport({ record }: Props) {
-  const { patientInfo, analysis, transcript } = record;
-  if (!analysis) return null;
-
+export default function ResultsReport({ patientInfo, transcript, analysis }: Props) {
   const config = RECOMMENDATION_CONFIG[analysis.recommendation];
   const assessmentDate = new Date(patientInfo.dateOfAssessment).toLocaleDateString('en-US', {
     year: 'numeric', month: 'long', day: 'numeric',
@@ -65,16 +64,24 @@ export default function ResultsReport({ record }: Props) {
           <span>/</span>
           <span className="text-slate-700">Results</span>
         </div>
-        <button
-          onClick={() => window.print()}
-          className="flex items-center gap-2 text-sm bg-slate-800 text-white px-4 py-2 rounded-lg hover:bg-slate-700"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-          </svg>
-          Print Report
-        </button>
+        <div className="flex items-center gap-3">
+          <a
+            href="/assessment/new"
+            className="text-sm text-slate-600 hover:text-slate-800 border border-slate-300 px-3 py-1.5 rounded-lg hover:bg-slate-50"
+          >
+            New Assessment
+          </a>
+          <button
+            onClick={() => window.print()}
+            className="flex items-center gap-2 text-sm bg-slate-800 text-white px-4 py-2 rounded-lg hover:bg-slate-700"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+            </svg>
+            Print Report
+          </button>
+        </div>
       </div>
 
       {/* Report header */}
@@ -215,7 +222,7 @@ export default function ResultsReport({ record }: Props) {
 
       {/* Norms reference */}
       <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 mb-6 text-xs text-slate-500">
-        <p className="font-medium text-slate-600 mb-1">References & Normative Data</p>
+        <p className="font-medium text-slate-600 mb-1">References &amp; Normative Data</p>
         <p>Yairi, E., &amp; Ambrose, N. (2005). <em>Early Childhood Stuttering.</em> Pro-Ed.</p>
         <p>Guitar, B. (2019). <em>Stuttering: An Integrated Approach to its Nature and Treatment</em> (5th ed.). Lippincott.</p>
         <p>ASHA. (2016). Scope of practice in speech-language pathology. American Speech-Language-Hearing Association.</p>
@@ -223,19 +230,6 @@ export default function ResultsReport({ record }: Props) {
           This report is a screening tool only and does not constitute a diagnosis. Results should be interpreted
           by a licensed SLP in conjunction with clinical observation and standardized assessment.
         </p>
-      </div>
-
-      {/* Start new assessment */}
-      <div className="no-print text-center">
-        <a
-          href="/assessment/new"
-          className="inline-flex items-center gap-2 text-sm text-slate-600 hover:text-slate-800 border border-slate-300 px-4 py-2 rounded-lg hover:bg-slate-50"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          Start New Assessment
-        </a>
       </div>
     </div>
   );

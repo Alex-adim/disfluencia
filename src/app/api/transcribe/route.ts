@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getOpenAIClient } from '@/lib/openai';
-import { getAssessment, updateAssessment } from '@/lib/storage';
-import type { WhisperSegment } from '@/types';
+import { PatientInfoSchema } from '@/lib/schemas';
+import type { WhisperSegment, PatientInfo } from '@/types';
 
 export const maxDuration = 60;
 
@@ -16,18 +16,21 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
-    const assessmentId = formData.get('assessmentId') as string | null;
+    const patientInfoJson = formData.get('patientInfo') as string | null;
 
-    if (!file || !assessmentId) {
-      return NextResponse.json(
-        { error: 'Missing file or assessmentId' },
-        { status: 400 }
-      );
+    if (!file) {
+      return NextResponse.json({ error: 'Missing audio file' }, { status: 400 });
     }
 
-    const record = getAssessment(assessmentId);
-    if (!record) {
-      return NextResponse.json({ error: 'Assessment not found' }, { status: 404 });
+    if (!patientInfoJson) {
+      return NextResponse.json({ error: 'Missing patient information' }, { status: 400 });
+    }
+
+    let patientInfo: PatientInfo;
+    try {
+      patientInfo = JSON.parse(patientInfoJson) as PatientInfo;
+    } catch {
+      return NextResponse.json({ error: 'Invalid patient information JSON' }, { status: 400 });
     }
 
     // Validate file type
@@ -44,7 +47,6 @@ export async function POST(request: NextRequest) {
 
     const openai = getOpenAIClient();
 
-    // Use verbose_json for word-level timestamps
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const transcription = await (openai.audio.transcriptions.create as any)({
       model: 'whisper-1',
@@ -57,21 +59,12 @@ export async function POST(request: NextRequest) {
     const result = transcription as unknown as {
       text: string;
       segments?: WhisperSegment[];
-      words?: { word: string; start: number; end: number }[];
     };
 
-    const transcript = result.text;
-    const whisperSegments: WhisperSegment[] = result.segments ?? [];
-
-    updateAssessment(assessmentId, {
-      transcript,
-      whisperSegments,
-      status: 'transcribed',
-    });
-
     return NextResponse.json({
-      transcript,
-      wordCount: transcript.split(/\s+/).filter(Boolean).length,
+      transcript: result.text,
+      whisperSegments: result.segments ?? [],
+      wordCount: result.text.split(/\s+/).filter(Boolean).length,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Transcription failed';

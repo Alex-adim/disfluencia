@@ -3,23 +3,26 @@
 import { useRouter } from 'next/navigation';
 import PatientInfoForm from '@/components/PatientInfoForm';
 import type { PatientInfoFormData } from '@/lib/schemas';
+import type { PatientInfo } from '@/types';
+
+function generateId(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
 
 export default function NewAssessmentPage() {
   const router = useRouter();
 
   async function handleSubmit(data: PatientInfoFormData) {
-    const response = await fetch('/api/assessment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
+    const id = generateId();
+    const totalAgeMonths = data.ageYears * 12 + data.ageMonths;
 
-    if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.error || 'Failed to create assessment');
-    }
+    const patientInfo: PatientInfo = { id, ...data, totalAgeMonths };
 
-    const { id } = await response.json();
+    sessionStorage.setItem(`assessment:${id}:patient`, JSON.stringify(patientInfo));
+
     router.push(`/assessment/${id}/upload`);
   }
 
@@ -31,7 +34,6 @@ export default function NewAssessmentPage() {
           <span>/</span>
           <span className="text-slate-700">New Assessment</span>
         </div>
-
         <h2 className="text-2xl font-bold text-slate-900">Patient Information</h2>
         <p className="text-slate-500 mt-1">
           Enter the child&apos;s information before uploading the audio sample.
@@ -41,7 +43,7 @@ export default function NewAssessmentPage() {
       <div className="flex items-center gap-2 mb-8 no-print">
         {['Patient Info', 'Upload Audio', 'Processing', 'Results'].map((step, i) => (
           <div key={step} className="flex items-center gap-2">
-            <div className={`flex items-center gap-2 ${i === 0 ? 'text-blue-600' : 'text-slate-400'}`}>
+            <div className="flex items-center gap-2">
               <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold border-2
                 ${i === 0 ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-300 text-slate-400'}`}>
                 {i + 1}
